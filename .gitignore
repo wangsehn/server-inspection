@@ -1,0 +1,2 @@
+# 巡检报告为运行产物，不入库（保留 .gitkeep 占位）
+reports/*.txt

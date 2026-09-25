@@ -1,0 +1,22 @@
+=== 真实 crontab 定时触发验证（2026-09-25，WSL2 Ubuntu 26.04） ===
+
+--- 注册的 crontab（每分钟一次，验证后已恢复原表） ---
+* * * * * /opt/server-inspection/health_check.sh --outdir /tmp/crontest/out >> /tmp/crontest/run.log 2>&1; echo rc=$? >> /tmp/crontest/run.log
+
+--- 触发时间线 ---
+注册 crontab 后等待，由 cron 守护进程按分钟边界自动触发（未手动执行脚本）
+
+--- run.log 尾部（cron 实际执行输出） ---
+⚠️  巡检完成：共发现 3 项异常，详见上方告警条目
+
+========================================
+  报告文件: /tmp/crontest/out/inspection_demo-server_20260925_204801.txt
+========================================
+rc=1
+
+--- 系统日志（/var/log/syslog，已脱敏） ---
+2026-09-25T20:48:01.262763+08:00 demo-server CRON[438]: (operator) CMD (/opt/server-inspection/health_check.sh --outdir /tmp/crontest/out >> /tmp/crontest/run.log 2>&1; echo rc=$? >> /tmp/crontest/run.log)
+
+--- 验证结论 ---
+cron 守护进程按计划时间自动触发巡检；报告正常落盘、无 ANSI 乱码；
+报告中告警项数与 rc 退出码判定一致。

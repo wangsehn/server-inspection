@@ -3,7 +3,7 @@
 # health_check.sh 自动化测试脚本
 # 用法: bash tests/run_tests.sh
 # 覆盖: 语法 / 正常参数 / 错误参数 / 配置缺失 / 报告生成 /
-#       退出码一致性 / ANSI 乱码 / 临时文件清理 /
+#       退出码一致性 / ANSI 乱码 / 临时文件清理(正常+SIGTERM中断) /
 #       零告警场景 / 故障注入场景（必现告警）
 # 说明: T10/T11 通过临时配置夹具构造确定性场景，
 #       不依赖当前机器的资源使用率等不确定因素
@@ -189,6 +189,25 @@ if [ "$rc11" -eq 1 ] && [ "$fw" -ge 3 ] && [ "$summary_n" -eq "$fw" ] \
     ok "T11 故障注入场景: rc=1、${fw} 项告警、汇总计数一致、无临时文件残留"
 else
     bad "T11 故障注入场景异常 (rc=$rc11, 警告=$fw, 汇总=$summary_n, 报告=${fault_rep:-未生成})"
+fi
+
+# ---------- T12 临时文件清理（SIGTERM 中断路径） ----------
+# 巡检全程数秒，1.5 秒时必在运行中；此时发 SIGTERM，
+# trap 'rm -f "$WARN_LOG"' INT/TERM 应清理专用 TMPDIR 中的临时文件
+mkdir -p "$TMP/t12tmp" "$TMP/t12out"
+TMPDIR="$TMP/t12tmp" "$SCRIPT" --outdir "$TMP/t12out" >/dev/null 2>&1 &
+t12pid=$!
+sleep 1.5
+if kill -0 "$t12pid" 2>/dev/null; then
+    kill -TERM "$t12pid" 2>/dev/null
+    wait "$t12pid" 2>/dev/null
+    if [ -z "$(ls -A "$TMP/t12tmp" 2>/dev/null)" ]; then
+        ok "T12 SIGTERM 中断后告警临时文件已清理"
+    else
+        bad "T12 SIGTERM 中断后临时文件残留: $(ls -A "$TMP/t12tmp")"
+    fi
+else
+    bad "T12 脚本提前退出，未测到中断路径"
 fi
 
 # ---------- 清理与汇总 ----------

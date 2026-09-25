@@ -1,1 +1,4 @@
-* * * * * /mnt/c/Users/57271/Desktop/ops-projects/server-inspection/health_check.sh --outdir /mnt/c/Users/57271/Desktop/ops-projects/server-inspection/docs/evidence/cron >/dev/null 2>&1
+# cron 定时巡检配置示例（真实部署时的 crontab 内容）
+# 安装方式： crontab cron-test.cron   或   crontab -e 后粘贴此行
+# 说明：脚本报出异常时退出码为 1，可用 `|| 告警动作` 在同一行接入通知
+* * * * * /opt/server-inspection/health_check.sh --outdir /opt/server-inspection/reports >/dev/null 2>&1

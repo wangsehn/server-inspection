@@ -24,9 +24,20 @@ OUTDIR="${SCRIPT_DIR}/reports"
 while [ $# -gt 0 ]; do
     case "$1" in
         --outdir)
+            # 参数校验：--outdir 后必须跟目录参数，避免 set -u 下引用未定义的 $2
+            if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                echo "错误: --outdir 需要一个目录参数" >&2
+                echo "用法: $0 --outdir <目录>（或直接运行 $0 使用默认 reports/ 目录）" >&2
+                exit 2
+            fi
             OUTDIR="$2"; shift 2 ;;
         --outdir=*)
-            OUTDIR="${1#--outdir=}"; shift ;;
+            OUTDIR="${1#--outdir=}"
+            if [ -z "$OUTDIR" ]; then
+                echo "错误: --outdir= 后不能为空" >&2
+                exit 2
+            fi
+            shift ;;
         -h|--help)
             echo "用法: $0 [--outdir 输出目录]"
             echo "巡检系统/CPU/内存/磁盘/服务/安全/端口/网络，生成 TXT 巡检报告"
@@ -66,7 +77,9 @@ fi
 
 # 告警临时记录文件：巡检输出经过 tee 管道（子 shell），变量计数会丢失，
 # 因此把告警同时落盘，汇总和退出码都从这里统计
+# trap 保证脚本被中断（Ctrl+C / kill）时临时文件也会被清理
 WARN_LOG="$(mktemp)"
+trap 'rm -f "$WARN_LOG" 2>/dev/null' EXIT INT TERM
 REPORT_FILE="${OUTDIR}/inspection_$(hostname)_$(date +%Y%m%d_%H%M%S).txt"
 
 # 打印章节标题

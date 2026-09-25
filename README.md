@@ -30,13 +30,19 @@ chmod +x health_check.sh
 
 ## 自动化测试
 
-仓库自带测试脚本，克隆后可一键回归验证（语法 / 正常参数 / 错误参数 / 配置缺失 / 报告生成 / 退出码一致性 / ANSI 乱码）：
+仓库自带测试脚本，克隆后可一键回归验证（语法 / 正常参数 / 错误参数 / 配置缺失 / 报告生成 / 退出码一致性 / ANSI 乱码 / 临时文件清理 / 零告警场景 / 故障注入场景）：
 
 ```bash
 bash tests/run_tests.sh
 ```
 
-当前测试结果：**10 项全部通过**（含 `--outdir` 缺参数的回归用例）。
+当前测试结果：**11 项全部通过**（WSL2 Ubuntu 26.04 实测，含 `--outdir` 缺参数回归用例）。
+
+其中零告警与故障注入两个场景通过临时配置夹具构造，结果确定、可复现：
+
+- **零告警场景**：阈值调至 100% + ping 回环地址 + 解析 localhost + 本地起一个 HTTP 服务保证探活 200 —— 断言退出码 0、报告中零告警、结论为"全部正常"
+- **故障注入场景**：注入三个必现故障（非法主机名导致 DNS 解析失败、非法主机名导致 ping 失败、探活指向关闭端口返回 000）—— 断言退出码 1、至少 3 项告警、且汇总行"共发现 N 项异常"的计数与实际告警条数一致（回归验证告警落盘计数逻辑）
+- **临时文件清理**：用专用 `TMPDIR` 目录运行脚本，退出后检查目录为空，验证 `trap` 清理真实生效
 
 ## 配置说明
 
@@ -71,28 +77,31 @@ crontab -e
 
 **定时调用验证情况（如实说明）**：
 
-- 脚本对 cron 场景的支持已验证：非交互环境自动关闭颜色、报告正常落盘、退出码正确——使用 `env -i PATH=/usr/bin:/bin /bin/sh -c "..."` 模拟 cron 的最小执行环境实测通过，报告生成、退出码为 1 均符合预期（见 `docs/evidence/cron-run-report.txt`）
-- 受开发机 WSL2 空闲自动关机限制，未完成多天级长期定时运行的验证；长期驻留测试建议在真实 Linux 服务器上执行上述 crontab 配置
+- 脚本对 cron 场景的支持已通过等效方式验证：使用 `env -i PATH=/usr/bin:/bin /bin/sh -c "..."` 模拟 cron 的最小执行环境实测，报告正常落盘、无 ANSI 乱码，报告中 3 项磁盘告警与退出码 1 的判定逻辑一致（见 `docs/evidence/cron-run-report.txt`）；但这不等于真实 crontab 驻留运行
+- 受开发机 WSL2 空闲自动关机限制，未完成真实 crontab 注册及多天级长期定时运行的验证；长期驻留测试建议在真实 Linux 服务器上执行上述 crontab 配置
 
 ## 故障验证演练（重点）
 
-巡检工具的价值在于"能发现异常"，必须实测一次：
+巡检工具的价值在于"能发现异常"，必须实测一次（以本仓库保存的三份联动报告为例，被探活的业务是项目一的 Nginx 演示站点）：
 
 ```bash
-# 1. 正常状态：HTTP 探活通过，无告警
+# 1. 基线巡检：业务探活通过。
+#    注意：巡检结论取决于当时机器的真实状态——本机实测基线报告中
+#    另有 3 项磁盘使用率告警（见下方证据表格），并非"零告警"
 ./health_check.sh
 
 # 2. 制造故障：停止被监控的业务服务（例如项目一的 Nginx 演示站点）
 docker stop nginx        # 或 systemctl stop <你的业务服务>
 
-# 3. 再次巡检：HTTP 探活失败，结论为"发现 1 项异常"，退出码 1
+# 3. 再次巡检：新增「HTTP 探活失败」告警（本机实测共 4 项），退出码 1
 ./health_check.sh
 
-# 4. 恢复服务后复测，恢复"全部正常"
+# 4. 恢复服务后复测：HTTP 告警消失；其余告警是否清零取决于环境
+#    （本机磁盘告警为环境固有，仍保留）
 docker start nginx && ./health_check.sh
 ```
 
-对比三份报告中的「网络与连通性检查 / 巡检结论」小节，就是一份完整的巡检记录：**正常基线 → 异常发现 → 恢复确认**。
+对比三份报告中的「网络与连通性检查 / 巡检结论」小节，就是一份完整的巡检记录：**基线 → 异常发现 → 恢复确认**。
 
 ## 实际运行证据
 
@@ -100,9 +109,9 @@ docker start nginx && ./health_check.sh
 
 | 文件 | 场景 | HTTP 探活 | 关键结果 |
 | --- | --- | --- | --- |
-| [normal-report.txt](docs/evidence/normal-report.txt) | Nginx 正常运行 | ✅ HTTP 200 | 磁盘使用率告警（真实数据，87% > 85% 阈值） |
-| [failure-report.txt](docs/evidence/failure-report.txt) | 停止 Nginx 后巡检 | ❌ HTTP 000 | 新增「HTTP 探活失败」告警，退出码 1 |
-| [recovery-report.txt](docs/evidence/recovery-report.txt) | 恢复 Nginx 后复测 | ✅ HTTP 200 | HTTP 告警消失，其余告警保留 |
+| [normal-report.txt](docs/evidence/normal-report.txt) | Nginx 正常运行 | ✅ HTTP 200 | 磁盘使用率告警 3 项（/mnt/c 88%、/usr/lib/wsl/drivers 88%、/mnt/e 87%，真实数据超过 85% 阈值），退出码 1 |
+| [failure-report.txt](docs/evidence/failure-report.txt) | 停止 Nginx 后巡检 | ❌ HTTP 000 | 新增「HTTP 探活失败」告警，共 4 项，退出码 1 |
+| [recovery-report.txt](docs/evidence/recovery-report.txt) | 恢复 Nginx 后复测 | ✅ HTTP 200 | HTTP 告警消失，磁盘告警 3 项保留（环境固有），退出码仍为 1 |
 
 三份报告均已在脱敏时替换主机名、用户名与内网网关地址；告警内容为真实巡检输出，非人工编造。
 

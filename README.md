@@ -28,6 +28,16 @@ chmod +x health_check.sh
 
 退出码：`0` = 全部正常；`1` = 存在告警项。因此可以直接写进定时任务做判断。
 
+## 自动化测试
+
+仓库自带测试脚本，克隆后可一键回归验证（语法 / 正常参数 / 错误参数 / 配置缺失 / 报告生成 / 退出码一致性 / ANSI 乱码）：
+
+```bash
+bash tests/run_tests.sh
+```
+
+当前测试结果：**10 项全部通过**（含 `--outdir` 缺参数的回归用例）。
+
 ## 配置说明
 
 阈值与巡检目标集中在 `inspection.conf`，改配置不改代码：
@@ -59,6 +69,11 @@ crontab -e
 */30 * * * * /opt/server-inspection/health_check.sh >/dev/null 2>&1
 ```
 
+**定时调用验证情况（如实说明）**：
+
+- 脚本对 cron 场景的支持已验证：非交互环境自动关闭颜色、报告正常落盘、退出码正确——使用 `env -i PATH=/usr/bin:/bin /bin/sh -c "..."` 模拟 cron 的最小执行环境实测通过，报告生成、退出码为 1 均符合预期（见 `docs/evidence/cron-run-report.txt`）
+- 受开发机 WSL2 空闲自动关机限制，未完成多天级长期定时运行的验证；长期驻留测试建议在真实 Linux 服务器上执行上述 crontab 配置
+
 ## 故障验证演练（重点）
 
 巡检工具的价值在于"能发现异常"，必须实测一次：
@@ -79,6 +94,18 @@ docker start nginx && ./health_check.sh
 
 对比三份报告中的「网络与连通性检查 / 巡检结论」小节，就是一份完整的巡检记录：**正常基线 → 异常发现 → 恢复确认**。
 
+## 实际运行证据
+
+`docs/evidence/` 保存了本机（WSL2 Ubuntu 26.04）与监控栈 Nginx 站点（`http://localhost:8081`）联动实测的三份脱敏巡检报告：
+
+| 文件 | 场景 | HTTP 探活 | 关键结果 |
+| --- | --- | --- | --- |
+| [normal-report.txt](docs/evidence/normal-report.txt) | Nginx 正常运行 | ✅ HTTP 200 | 磁盘使用率告警（真实数据，87% > 85% 阈值） |
+| [failure-report.txt](docs/evidence/failure-report.txt) | 停止 Nginx 后巡检 | ❌ HTTP 000 | 新增「HTTP 探活失败」告警，退出码 1 |
+| [recovery-report.txt](docs/evidence/recovery-report.txt) | 恢复 Nginx 后复测 | ✅ HTTP 200 | HTTP 告警消失，其余告警保留 |
+
+三份报告均已在脱敏时替换主机名、用户名与内网网关地址；告警内容为真实巡检输出，非人工编造。
+
 ## 相对参考仓库的修改点
 
 基础思路参考 [MickaxL/bash-system-health-check](https://github.com/MickaxL/bash-system-health-check)（MIT License），本项目为学习目的的重写与扩展：
@@ -92,6 +119,8 @@ docker start nginx && ./health_check.sh
 7. **磁盘检查增强**：从只查根分区改为遍历全部真实分区逐一判阈值
 8. **服务状态兼容**：无 systemd 环境自动回退 `service` 命令，未安装的服务显示"跳过"而非误报
 9. **统一 `LC_ALL=C`**：保证 `top/df/sort` 输出格式稳定可解析，不受系统语言影响
+10. **参数健壮性**：`--outdir` 缺失目录参数时输出明确错误并返回退出码 2，而非未定义变量异常（含回归测试用例）
+11. **临时文件兜底清理**：`trap EXIT/INT/TERM` 保证脚本被中断时告警临时文件不残留
 
 ## 简历写法参考
 
@@ -103,3 +132,7 @@ docker start nginx && ./health_check.sh
 
 - Bash 4+（Ubuntu / Debian / RHEL 等主流发行版默认满足）
 - 可选命令缺失时自动降级：`curl`（HTTP 探活）、`last`（登录记录）、`ss/netstat`（端口）
+
+## 开源来源与许可证
+
+本项目基础思路参考 [MickaxL/bash-system-health-check](https://github.com/MickaxL/bash-system-health-check)（MIT License，Copyright (c) 2026 MickaxL）重写并扩展，原作者版权声明与许可证全文保留于 [LICENSE](LICENSE)，本项目的重写与新增部分以独立声明标注，同样以 MIT 协议分发。
